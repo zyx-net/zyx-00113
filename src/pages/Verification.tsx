@@ -148,7 +148,7 @@ export default function Verification() {
               点击"运行测试"开始验证冲突历史链路
             </p>
             <div className="bg-blue-50 rounded-lg p-4 max-w-2xl mx-auto">
-              <h3 className="font-semibold text-blue-800 mb-2">测试覆盖范围（共10项）：</h3>
+              <h3 className="font-semibold text-blue-800 mb-2">测试覆盖范围（共14项）：</h3>
               <ul className="text-sm text-blue-700 space-y-1 text-left">
                 <li>✅ 1. 筛选条件持久化</li>
                 <li>✅ 2. 初始数据无假历史</li>
@@ -160,6 +160,10 @@ export default function Verification() {
                 <li>✅ 8. 冲突组关联完整性</li>
                 <li>✅ 9. 权限链路验证</li>
                 <li>✅ 10. 冲突校验逻辑</li>
+                <li>✅ 11. 跨房间冲突不误报</li>
+                <li>✅ 12. 权限切换链路</li>
+                <li>✅ 13. 历史列表顺序</li>
+                <li>✅ 14. 冲突关系保持</li>
               </ul>
             </div>
           </div>

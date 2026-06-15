@@ -5,6 +5,7 @@ import RoomManagement from './pages/RoomManagement';
 import Blacklist from './pages/Blacklist';
 import Logs from './pages/Logs';
 import Export from './pages/Export';
+import Verification from './pages/Verification';
 import useStore from './store/useStore';
 
 export default function App() {
@@ -27,6 +28,8 @@ export default function App() {
         return <Logs />;
       case 'export':
         return <Export />;
+      case 'verification':
+        return <Verification />;
       default:
         return <Dashboard />;
     }

@@ -16,6 +16,23 @@
 - **筛选持久化**：筛选条件自动保存，刷新或重启后自动恢复
 - **冲突历史追踪**：取消和改期记录保留原始冲突链，可在历史列表、日志和导出中查看
 
+## 新增功能：冲突历史验证测试
+
+系统提供了内置的验证测试页面，可以自动验证冲突历史链路的完整性。
+
+### 访问验证测试
+1. 在侧边栏点击"验证测试"
+2. 点击"运行测试"按钮
+3. 查看测试结果和详情
+
+### 自动测试项目
+- ✅ 筛选条件持久化验证
+- ✅ 冲突历史数据结构完整性
+- ✅ 取消记录保留历史冲突链
+- ✅ 操作日志冲突信息记录
+- ✅ 导出数据结构准备就绪
+- ✅ LocalStorage 数据持久化验证
+
 ### 用户角色
 - **管理员**：完整权限，可执行所有操作
 - **普通用户**：仅查看权限，无权锁房
@@ -121,7 +138,77 @@ src/
 - 点击"添加黑名单"按钮，输入组织者姓名和原因
 - 被加入黑名单的组织者无法创建新预约
 
-### 冲突与权限失败验证
+## 核心问题修复：先改期再取消链路
+
+### 问题描述
+之前的版本在处理"先改期再取消"场景时存在缺陷：
+1. 预约 A 和 B 在同一会议室时间重叠，产生冲突
+2. 将预约 A 改期到无冲突的时间，冲突解除
+3. 取消预约 A
+4. **Bug**：取消记录中无法看出 A 曾经关联过冲突，也分不清 A 是先改期还是直接取消
+
+### 问题根因
+`cancelReservation` 函数只检查**当前**的冲突状态：
+- 预约 A 改期后，`conflictId` 变为 `null`
+- 取消时 `detectConflicts()` 找不到 A 在任何冲突组中
+- 导致冲突历史记录丢失
+
+### 解决方案
+修改 `cancelReservation` 函数，优先检查历史冲突记录：
+```typescript
+// 检查当前冲突状态
+const hasCurrentConflict = conflictGroup && conflictGroup.reservationIds.length > 1;
+// 检查历史冲突记录
+const hasHistoricalConflict = reservation.conflictHistory && reservation.conflictHistory.length > 0;
+// 追溯历史冲突
+const originalConflictId = reservation.originalConflictId || 
+  (hasHistoricalConflict ? reservation.conflictHistory![0].conflictId : null);
+```
+
+### 三种取消场景的处理
+1. **当前冲突取消**：预约仍在冲突组中，正常记录
+2. **历史冲突追溯取消**：预约已脱离冲突，但通过 `conflictHistory` 追溯原冲突
+3. **无冲突取消**：预约从未在冲突组中
+
+### 数据结构增强
+```typescript
+interface ConflictHistoryEntry {
+  conflictId: string;
+  action: 'reschedule' | 'cancel';
+  timestamp: string;
+  operator: string;
+  detail: string;  // 包含操作链信息
+  relatedReservationIds: string[];
+}
+```
+
+### 日志增强
+- 改期操作：`[解除冲突: xxx]` 标记
+- 取消操作：`[追溯历史冲突: xxx]` 或 `[关联当前冲突: xxx]` 标记
+- 取消无冲突：`[无冲突记录]` 标记
+
+### 导出数据增强
+导出的 CSV 包含：
+- **预约ID**：唯一标识
+- **原冲突ID**：追溯原始冲突组
+- **冲突历史链**：操作序列（如 `reschedule -> cancel`）
+- **冲突历史详情**：完整操作记录
+
+### 验证方法
+#### 方法1：使用内置验证测试
+1. 导航到"验证测试"页面
+2. 执行"先改期再取消"操作
+3. 点击"运行测试"查看结果
+
+#### 方法2：手动验证
+1. 展开预约详情
+2. 查看"冲突历史"标签
+3. 预期显示完整操作链
+
+#### 方法3：检查导出数据
+1. 导出预约数据
+2. 查看 CSV 中的冲突历史字段
+3. 验证操作链完整性
 
 #### 1. 重叠预约互相覆盖（失败路径）
 - 尝试将一条预约改期到与另一条预约重叠的时间

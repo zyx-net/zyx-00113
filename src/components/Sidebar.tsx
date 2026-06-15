@@ -5,7 +5,8 @@ import {
   FileText, 
   Download,
   Shield,
-  ShieldOff
+  ShieldOff,
+  CheckCircle
 } from 'lucide-react';
 import useStore from '../store/useStore';
 
@@ -23,6 +24,7 @@ export default function Sidebar({ activePage, onPageChange }: SidebarProps) {
     { id: 'blacklist', label: '黑名单', icon: UserX },
     { id: 'logs', label: '操作日志', icon: FileText },
     { id: 'export', label: '数据导出', icon: Download },
+    { id: 'verification', label: '验证测试', icon: CheckCircle },
   ];
 
   return (

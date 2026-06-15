@@ -7,6 +7,7 @@ export default function Export() {
 
   const exportReservations = () => {
     const exportData = reservations.map(r => ({
+      预约ID: r.id,
       会议室: r.roomName,
       组织者: r.organizer,
       开始时间: formatDateTime(r.startTime),
@@ -15,8 +16,11 @@ export default function Export() {
       备注: r.remark,
       当前冲突ID: r.conflictId || '-',
       原冲突ID: r.originalConflictId || '-',
-      冲突历史: r.conflictHistory && r.conflictHistory.length > 0 
-        ? r.conflictHistory.map(h => `${h.action}(${h.conflictId})`).join('; ')
+      冲突历史链: r.conflictHistory && r.conflictHistory.length > 0 
+        ? r.conflictHistory.map(h => `${h.action}(${h.conflictId})`).join(' -> ')
+        : '-',
+      冲突历史详情: r.conflictHistory && r.conflictHistory.length > 0
+        ? r.conflictHistory.map(h => `${h.operator}于${formatDateTime(h.timestamp)}${h.action}: ${h.detail}`).join('; ')
         : '-',
       创建时间: formatDateTime(r.createdAt),
       更新时间: formatDateTime(r.updatedAt),

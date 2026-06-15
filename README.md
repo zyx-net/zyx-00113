@@ -207,6 +207,7 @@ interface ConflictHistoryEntry {
    - `public/test-console.js`：基础验证脚本
    - `public/trace-state.js`：状态流转追踪脚本
    - `public/full-test.js`：完整测试套件
+   - `public/verify-complete.js`：可执行验证脚本（最新）
 4. 复制脚本内容并粘贴到控制台
 5. 按回车执行
 6. 查看测试结果和建议

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Play, Trash2, CheckCircle, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Trash2, CheckCircle, XCircle, ChevronDown, ChevronUp, Clock } from 'lucide-react';
 import { runVerificationTests, clearAllData } from '../utils/verification';
 
 interface TestResult {
   name: string;
   passed: boolean;
   message: string;
+  isPending?: boolean;
 }
 
 export default function Verification() {
@@ -30,8 +31,9 @@ export default function Verification() {
     }
   };
 
-  const passedCount = testResults.filter(t => t.passed).length;
-  const failedCount = testResults.filter(t => !t.passed).length;
+  const passedCount = testResults.filter(t => !t.isPending && t.passed).length;
+  const failedCount = testResults.filter(t => !t.isPending && !t.passed).length;
+  const pendingCount = testResults.filter(t => t.isPending).length;
 
   return (
     <div className="space-y-6">
@@ -63,7 +65,7 @@ export default function Verification() {
         {testResults.length > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-6">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-5 h-5 text-green-600" />
                   <span className="text-lg font-semibold text-green-700">{passedCount}</span>
@@ -73,6 +75,11 @@ export default function Verification() {
                   <XCircle className="w-5 h-5 text-red-600" />
                   <span className="text-lg font-semibold text-red-700">{failedCount}</span>
                   <span className="text-gray-600">失败</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-yellow-600" />
+                  <span className="text-lg font-semibold text-yellow-700">{pendingCount}</span>
+                  <span className="text-gray-600">待验证</span>
                 </div>
               </div>
               <button
@@ -99,25 +106,29 @@ export default function Verification() {
                   <div
                     key={index}
                     className={`p-4 rounded-lg border ${
-                      result.passed
-                        ? 'bg-green-50 border-green-200'
-                        : 'bg-red-50 border-red-200'
+                      result.isPending
+                        ? 'bg-yellow-50 border-yellow-200'
+                        : result.passed
+                          ? 'bg-green-50 border-green-200'
+                          : 'bg-red-50 border-red-200'
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      {result.passed ? (
+                      {result.isPending ? (
+                        <Clock className="w-5 h-5 text-yellow-600 mt-0.5" />
+                      ) : result.passed ? (
                         <CheckCircle className="w-5 h-5 text-green-600 mt-0.5" />
                       ) : (
                         <XCircle className="w-5 h-5 text-red-600 mt-0.5" />
                       )}
                       <div className="flex-1">
                         <h4 className={`font-semibold ${
-                          result.passed ? 'text-green-800' : 'text-red-800'
+                          result.isPending ? 'text-yellow-800' : result.passed ? 'text-green-800' : 'text-red-800'
                         }`}>
                           {result.name}
                         </h4>
                         <p className={`text-sm mt-1 ${
-                          result.passed ? 'text-green-700' : 'text-red-700'
+                          result.isPending ? 'text-yellow-700' : result.passed ? 'text-green-700' : 'text-red-700'
                         }`}>
                           {result.message}
                         </p>
@@ -139,12 +150,14 @@ export default function Verification() {
             <div className="bg-blue-50 rounded-lg p-4 max-w-2xl mx-auto">
               <h3 className="font-semibold text-blue-800 mb-2">测试覆盖范围：</h3>
               <ul className="text-sm text-blue-700 space-y-1 text-left">
-                <li>✅ 筛选条件持久化验证</li>
-                <li>✅ 冲突历史数据结构完整性</li>
-                <li>✅ 取消记录保留历史冲突链</li>
-                <li>✅ 操作日志冲突信息记录</li>
-                <li>✅ 导出数据结构准备就绪</li>
-                <li>✅ LocalStorage 数据持久化验证</li>
+                <li>✅ 初始数据无假历史</li>
+                <li>✅ 筛选条件持久化</li>
+                <li>✅ 冲突组初始状态</li>
+                <li>⏸️ 取消记录保留历史（需操作）</li>
+                <li>⏸️ 操作日志冲突归属（需操作）</li>
+                <li>⏸️ 导出数据完整（需操作）</li>
+                <li>⏸️ LocalStorage 持久化（需操作）</li>
+                <li>✅ 冲突组关联完整性</li>
               </ul>
             </div>
           </div>
@@ -155,14 +168,14 @@ export default function Verification() {
         <h3 className="text-lg font-semibold text-gray-800 mb-4">手动验证步骤</h3>
         <div className="space-y-4">
           <div className="p-4 bg-yellow-50 rounded-lg">
-            <h4 className="font-semibold text-yellow-800 mb-2">场景1: 先改期再取消</h4>
+            <h4 className="font-semibold text-yellow-800 mb-2">场景1: 先改期再取消（核心链路）</h4>
             <ol className="text-sm text-yellow-700 space-y-1 list-decimal list-inside">
               <li>找到一条在冲突组中的预约（如会议室 A 的张三 09:00-10:00）</li>
               <li>点击改期图标，将时间改为 10:30-11:30（解除冲突）</li>
               <li>观察日志显示"解除冲突: xxx"</li>
               <li>取消该预约</li>
               <li>展开详情，查看"冲突历史"标签</li>
-              <li>预期：应显示 [改期] 和 [取消] 两条记录</li>
+              <li>预期：应显示 [改期] → [取消] 完整链</li>
             </ol>
           </div>
 
@@ -182,7 +195,7 @@ export default function Verification() {
               <li>完成场景1或场景2的操作</li>
               <li>导航到"数据导出"页面</li>
               <li>导出"预约数据"</li>
-              <li>打开 CSV 文件，检查列：预约ID、原冲突ID、冲突历史链、冲突历史详情</li>
+              <li>打开 CSV 文件，检查列：预约ID、原冲突ID、冲突历史链</li>
               <li>预期：取消的预约应包含完整的冲突历史链</li>
             </ol>
           </div>
@@ -197,12 +210,28 @@ export default function Verification() {
               <li>检查筛选条件是否保持</li>
             </ol>
           </div>
+
+          <div className="p-4 bg-red-50 rounded-lg">
+            <h4 className="font-semibold text-red-800 mb-2">场景5: 失败路径验证</h4>
+            <ol className="text-sm text-red-700 space-y-1 list-decimal list-inside">
+              <li>尝试将预约改期到与其他预约重叠的时间</li>
+              <li>预期：改期失败，提示"新时间与其他预约冲突"</li>
+              <li>切换为普通用户，尝试锁定房间</li>
+              <li>预期：操作被拦截，提示权限不足</li>
+            </ol>
+          </div>
         </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h3 className="text-lg font-semibold text-gray-800 mb-4">常见问题排查</h3>
         <div className="space-y-3">
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <h4 className="font-semibold text-gray-700 mb-1">Q: 初始数据验证失败？</h4>
+            <p className="text-sm text-gray-600">
+              A: 检查是否有不应该存在的冲突历史记录，这可能是因为之前操作遗留的数据。请点击"清除数据"重置。
+            </p>
+          </div>
           <div className="p-3 bg-gray-50 rounded-lg">
             <h4 className="font-semibold text-gray-700 mb-1">Q: 冲突历史显示不完整？</h4>
             <p className="text-sm text-gray-600">
@@ -216,9 +245,9 @@ export default function Verification() {
             </p>
           </div>
           <div className="p-3 bg-gray-50 rounded-lg">
-            <h4 className="font-semibold text-gray-700 mb-1">Q: 改期后取消，但历史只显示取消？</h4>
+            <h4 className="font-semibold text-gray-700 mb-1">Q: 验证一直显示"待验证"？</h4>
             <p className="text-sm text-gray-600">
-              A: 这是正常行为，因为改期后预约已脱离冲突组，取消时会通过 conflictHistory 追溯历史。
+              A: 这是正常的，说明还没有执行改期或取消操作。请先完成手动验证步骤，再运行测试。
             </p>
           </div>
         </div>

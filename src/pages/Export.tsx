@@ -1,4 +1,4 @@
-import { Download, FileText, TrendingUp, Calendar, Users } from 'lucide-react';
+import { Download, FileText, TrendingUp, Calendar, Users, AlertTriangle } from 'lucide-react';
 import useStore from '../store/useStore';
 import { exportToCSV, formatDateTime } from '../utils/helpers';
 
@@ -13,10 +13,43 @@ export default function Export() {
       结束时间: formatDateTime(r.endTime),
       状态: r.status === 'pending' ? '待确认' : r.status === 'confirmed' ? '已确认' : r.status === 'cancelled' ? '已取消' : '已改期',
       备注: r.remark,
+      当前冲突ID: r.conflictId || '-',
+      原冲突ID: r.originalConflictId || '-',
+      冲突历史: r.conflictHistory && r.conflictHistory.length > 0 
+        ? r.conflictHistory.map(h => `${h.action}(${h.conflictId})`).join('; ')
+        : '-',
       创建时间: formatDateTime(r.createdAt),
       更新时间: formatDateTime(r.updatedAt),
     }));
     exportToCSV(exportData, `reservations_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  const exportConflictHistory = () => {
+    const conflictReservations = reservations.filter(r => 
+      r.conflictHistory && r.conflictHistory.length > 0
+    );
+    
+    const exportData = conflictReservations.flatMap(r => 
+      r.conflictHistory!.map(history => ({
+        预约ID: r.id,
+        会议室: r.roomName,
+        组织者: r.organizer,
+        操作类型: history.action === 'reschedule' ? '改期' : '取消',
+        冲突组ID: history.conflictId,
+        操作人: history.operator,
+        操作时间: formatDateTime(history.timestamp),
+        详情: history.detail,
+        关联预约数: history.relatedReservationIds.length,
+        关联预约IDs: history.relatedReservationIds.join('; '),
+      }))
+    );
+    
+    if (exportData.length === 0) {
+      alert('暂无冲突历史记录');
+      return;
+    }
+    
+    exportToCSV(exportData, `conflict_history_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
   const exportRooms = () => {
@@ -50,6 +83,10 @@ export default function Export() {
     exportToCSV(exportData, `logs_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
+  const conflictHistoryCount = reservations.filter(r => 
+    r.conflictHistory && r.conflictHistory.length > 0
+  ).length;
+
   const stats = [
     {
       label: '预约总数',
@@ -74,6 +111,12 @@ export default function Export() {
       value: logs.length,
       icon: TrendingUp,
       color: 'bg-green-500',
+    },
+    {
+      label: '冲突历史',
+      value: conflictHistoryCount,
+      icon: AlertTriangle,
+      color: 'bg-orange-500',
     },
   ];
 
@@ -137,6 +180,16 @@ export default function Export() {
             <div className="text-left">
               <p className="font-medium">导出预约数据</p>
               <p className="text-sm text-blue-500">{reservations.length} 条记录</p>
+            </div>
+          </button>
+          <button
+            onClick={exportConflictHistory}
+            className="flex items-center justify-center gap-3 px-6 py-4 bg-orange-50 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors"
+          >
+            <Download className="w-5 h-5" />
+            <div className="text-left">
+              <p className="font-medium">导出冲突历史</p>
+              <p className="text-sm text-orange-500">{conflictHistoryCount} 条记录</p>
             </div>
           </button>
           <button

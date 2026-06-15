@@ -113,10 +113,11 @@ export const validateNoOverlap = (
   reservations: Reservation[],
   newStartTime: string,
   newEndTime: string,
-  excludeId: string | null = null
+  excludeId: string | null = null,
+  roomId?: string
 ): boolean => {
   const activeReservations = reservations.filter(
-    r => r.status !== 'cancelled' && r.id !== excludeId
+    r => r.status !== 'cancelled' && r.id !== excludeId && (roomId ? r.roomId === roomId : true)
   );
   
   return !activeReservations.some(r => 

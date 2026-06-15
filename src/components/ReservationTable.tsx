@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, User, MapPin, AlertTriangle, Edit2, Trash2, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
+import { Calendar, Clock, User, MapPin, AlertTriangle, Edit2, Trash2, MessageSquare, ChevronDown, ChevronUp, History } from 'lucide-react';
 import useStore from '../store/useStore';
 import { Reservation } from '../types';
 import { formatDateTime, getStatusLabel, getStatusColor } from '../utils/helpers';
@@ -240,7 +240,7 @@ export default function ReservationTable() {
                           <div className="mt-4 pt-4 border-t border-gray-200">
                             <h4 className="text-sm font-medium text-red-700 mb-2 flex items-center gap-2">
                               <AlertTriangle className="w-4 h-4" />
-                              冲突关联 ({conflictGroup.length} 条)
+                              当前冲突关联 ({conflictGroup.length} 条)
                             </h4>
                             <div className="flex flex-wrap gap-2">
                               {conflictGroup.map(r => (
@@ -251,6 +251,51 @@ export default function ReservationTable() {
                                   {r.organizer} - {formatDateTime(r.startTime)}
                                 </div>
                               ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {reservation.conflictHistory && reservation.conflictHistory.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-gray-200">
+                            <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                              <Clock className="w-4 h-4" />
+                              冲突历史 ({reservation.conflictHistory.length} 条)
+                            </h4>
+                            <div className="space-y-2">
+                              {reservation.conflictHistory.map((entry, index) => (
+                                <div key={index} className="p-3 bg-gray-50 rounded-lg">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                                      entry.action === 'reschedule' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'
+                                    }`}>
+                                      {entry.action === 'reschedule' ? '改期' : '取消'}
+                                    </span>
+                                    <span className="text-xs text-gray-500">{formatDateTime(entry.timestamp)}</span>
+                                    <span className="text-xs text-gray-400">by {entry.operator}</span>
+                                  </div>
+                                  <p className="text-sm text-gray-700">{entry.detail}</p>
+                                  <div className="mt-1 text-xs text-gray-500">
+                                    冲突组ID: {entry.conflictId} | 关联 {entry.relatedReservationIds.length} 条预约
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {reservation.originalConflictId && (
+                          <div className="mt-4 pt-4 border-t border-gray-200">
+                            <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4" />
+                              原冲突信息
+                            </h4>
+                            <div className="p-3 bg-yellow-50 rounded-lg">
+                              <p className="text-sm text-gray-700">
+                                原冲突组ID: <code className="px-1 bg-yellow-100 rounded text-xs">{reservation.originalConflictId}</code>
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                该预约曾关联此冲突组，后被取消
+                              </p>
                             </div>
                           </div>
                         )}

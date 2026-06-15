@@ -4,6 +4,7 @@ const STORAGE_KEYS = {
   BLACKLIST: 'room-scheduler-blacklist',
   LOGS: 'room-scheduler-logs',
   CURRENT_USER: 'room-scheduler-current-user',
+  FILTERS: 'room-scheduler-filters',
 };
 
 export const storage = {
@@ -74,5 +75,18 @@ export const storage = {
 
   clearAll: (): void => {
     Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key));
+  },
+
+  getFilters: <T>(): T | null => {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.FILTERS);
+      return data ? JSON.parse(data) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  setFilters: <T>(data: T): void => {
+    localStorage.setItem(STORAGE_KEYS.FILTERS, JSON.stringify(data));
   },
 };

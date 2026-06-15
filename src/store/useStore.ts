@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { Reservation, Room, BlacklistItem, LogEntry, User, FilterOptions } from '../types';
+import { Reservation, Room, BlacklistItem, LogEntry, User, FilterOptions, ConflictHistoryEntry } from '../types';
 import { storage } from '../utils/storage';
-import { generateId, detectConflicts, getReservationsWithConflictInfo } from '../utils/helpers';
+import { generateId, detectConflicts, getReservationsWithConflictInfo, validateNoOverlap } from '../utils/helpers';
 import { initialRooms, initialReservations, initialBlacklist, initialLogs, initialAdminUser, initialNormalUser } from '../data/initialData';
 
 interface StoreState {
@@ -54,6 +54,7 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
     let storedBlacklist = storage.getBlacklist<BlacklistItem>();
     let storedLogs = storage.getLogs<LogEntry>();
     let storedUser = storage.getCurrentUser<User>();
+    let storedFilters = storage.getFilters<FilterOptions>();
 
     if (storedReservations.length === 0) {
       storedReservations = initialReservations;
@@ -70,6 +71,15 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
     if (!storedUser) {
       storedUser = initialAdminUser;
     }
+    if (!storedFilters) {
+      storedFilters = {
+        roomId: null,
+        status: null,
+        organizer: null,
+        startDate: null,
+        endDate: null,
+      };
+    }
 
     const conflictGroups = detectConflicts(storedReservations);
     const reservationsWithConflict = getReservationsWithConflictInfo(storedReservations, conflictGroups);
@@ -81,6 +91,7 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
       logs: storedLogs,
       currentUser: storedUser,
       isAdminMode: storedUser.role === 'admin',
+      filters: storedFilters,
     });
 
     storage.setReservations(reservationsWithConflict);
@@ -88,6 +99,7 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
     storage.setBlacklist(storedBlacklist);
     storage.setLogs(storedLogs);
     storage.setCurrentUser(storedUser);
+    storage.setFilters(storedFilters);
   },
 
   addReservation: (reservation) => {
@@ -146,22 +158,49 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
   },
 
   cancelReservation: (id) => {
-    const { reservations } = get();
+    const { reservations, currentUser } = get();
     const reservation = reservations.find(r => r.id === id);
     if (!reservation) return;
 
+    const conflictGroups = detectConflicts(reservations);
+    const conflictGroup = conflictGroups.find(cg => cg.reservationIds.includes(id));
+    
+    let updatedReservation: Reservation = {
+      ...reservation,
+      status: 'cancelled' as const,
+      updatedAt: new Date().toISOString(),
+      cancellationReason: '用户取消',
+    };
+
+    if (conflictGroup && conflictGroup.reservationIds.length > 1) {
+      const historyEntry: ConflictHistoryEntry = {
+        conflictId: conflictGroup.id,
+        action: 'cancel',
+        timestamp: new Date().toISOString(),
+        operator: currentUser.name,
+        detail: `取消预约，关联冲突组ID: ${conflictGroup.id}`,
+        relatedReservationIds: conflictGroup.reservationIds,
+      };
+
+      updatedReservation = {
+        ...updatedReservation,
+        originalConflictId: conflictGroup.id,
+        conflictHistory: [...(reservation.conflictHistory || []), historyEntry],
+      };
+    }
+
     const updatedReservations = reservations.map(r => 
-      r.id === id ? { ...r, status: 'cancelled' as const, updatedAt: new Date().toISOString() } : r
+      r.id === id ? updatedReservation : r
     );
     
-    const conflictGroups = detectConflicts(updatedReservations);
-    const reservationsWithConflict = getReservationsWithConflictInfo(updatedReservations, conflictGroups);
+    const newConflictGroups = detectConflicts(updatedReservations);
+    const reservationsWithConflict = getReservationsWithConflictInfo(updatedReservations, newConflictGroups);
 
     set({ reservations: reservationsWithConflict });
     storage.setReservations(reservationsWithConflict);
 
     get().addLog('cancel', 'reservation', id, 
-      `取消预约: ${reservation.roomName} - ${reservation.organizer} (${new Date(reservation.startTime).toLocaleString('zh-CN')})`);
+      `取消预约: ${reservation.roomName} - ${reservation.organizer} (${new Date(reservation.startTime).toLocaleString('zh-CN')})${conflictGroup && conflictGroup.reservationIds.length > 1 ? ` [关联冲突: ${conflictGroup.id}]` : ''}`);
   },
 
   rescheduleReservation: (id, newStartTime, newEndTime) => {
@@ -169,8 +208,70 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
     const reservation = reservations.find(r => r.id === id);
     if (!reservation) return false;
 
-    const existingReservations = reservations.filter(r => r.id !== id && r.status !== 'cancelled');
-    const hasConflict = existingReservations.some(r => {
+    const conflictGroups = detectConflicts(reservations);
+    const hasConflict = conflictGroups.some(cg => 
+      cg.reservationIds.includes(id) && cg.reservationIds.length > 1
+    );
+
+    if (hasConflict) {
+      const currentConflictGroup = conflictGroups.find(cg => cg.reservationIds.includes(id));
+      if (currentConflictGroup) {
+        const relatedReservations = reservations.filter(r => 
+          currentConflictGroup.reservationIds.includes(r.id) && r.id !== id
+        );
+
+        const existingReservations = reservations.filter(
+          r => r.id !== id && r.status !== 'cancelled' && r.roomId === reservation.roomId
+        );
+        const hasTimeOverlap = existingReservations.some(r => {
+          const rStart = new Date(r.startTime).getTime();
+          const rEnd = new Date(r.endTime).getTime();
+          const newStart = new Date(newStartTime).getTime();
+          const newEnd = new Date(newEndTime).getTime();
+          return rStart < newEnd && newStart < rEnd;
+        });
+
+        if (hasTimeOverlap) {
+          return false;
+        }
+
+        const historyEntry: ConflictHistoryEntry = {
+          conflictId: currentConflictGroup.id,
+          action: 'reschedule',
+          timestamp: new Date().toISOString(),
+          operator: get().currentUser.name,
+          detail: `改期: ${new Date(reservation.startTime).toLocaleString('zh-CN')} -> ${new Date(newStartTime).toLocaleString('zh-CN')}`,
+          relatedReservationIds: currentConflictGroup.reservationIds,
+        };
+
+        const updatedReservations = reservations.map(r => 
+          r.id === id ? { 
+            ...r, 
+            startTime: newStartTime, 
+            endTime: newEndTime, 
+            status: 'rescheduled' as const, 
+            updatedAt: new Date().toISOString(),
+            conflictHistory: [...(r.conflictHistory || []), historyEntry],
+          } : r
+        );
+        
+        const newConflictGroups = detectConflicts(updatedReservations);
+        const reservationsWithConflict = getReservationsWithConflictInfo(updatedReservations, newConflictGroups);
+
+        set({ reservations: reservationsWithConflict });
+        storage.setReservations(reservationsWithConflict);
+
+        get().addLog('reschedule', 'reservation', id, 
+          `改期预约: ${reservation.roomName} - ${reservation.organizer} (${new Date(reservation.startTime).toLocaleString('zh-CN')} -> ${new Date(newStartTime).toLocaleString('zh-CN')})`);
+
+        return true;
+      }
+    }
+
+    const existingReservations = reservations.filter(
+      r => r.id !== id && r.status !== 'cancelled' && r.roomId === reservation.roomId
+    );
+    const hasTimeOverlap = existingReservations.some(r => {
       const rStart = new Date(r.startTime).getTime();
       const rEnd = new Date(r.endTime).getTime();
       const newStart = new Date(newStartTime).getTime();
@@ -178,7 +279,7 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
       return rStart < newEnd && newStart < rEnd;
     });
 
-    if (hasConflict) {
+    if (hasTimeOverlap) {
       return false;
     }
 
@@ -188,12 +289,12 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
         startTime: newStartTime, 
         endTime: newEndTime, 
         status: 'rescheduled' as const, 
-        updatedAt: new Date().toISOString() 
+        updatedAt: new Date().toISOString(),
       } : r
     );
     
-    const conflictGroups = detectConflicts(updatedReservations);
-    const reservationsWithConflict = getReservationsWithConflictInfo(updatedReservations, conflictGroups);
+    const newConflictGroups = detectConflicts(updatedReservations);
+    const reservationsWithConflict = getReservationsWithConflictInfo(updatedReservations, newConflictGroups);
 
     set({ reservations: reservationsWithConflict });
     storage.setReservations(reservationsWithConflict);
@@ -293,16 +394,19 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
 
   setFilters: (filters) => {
     set({ filters });
+    storage.setFilters(filters);
   },
 
   clearFilters: () => {
-    set({ filters: {
+    const clearedFilters = {
       roomId: null,
       status: null,
       organizer: null,
       startDate: null,
       endDate: null,
-    }});
+    };
+    set({ filters: clearedFilters });
+    storage.setFilters(clearedFilters);
   },
 
   addLog: (action, targetType, targetId, detail) => {

@@ -10,6 +10,18 @@ export interface Reservation {
   conflictId: string | null;
   createdAt: string;
   updatedAt: string;
+  cancellationReason?: string;
+  originalConflictId?: string | null;
+  conflictHistory?: ConflictHistoryEntry[];
+}
+
+export interface ConflictHistoryEntry {
+  conflictId: string;
+  action: 'reschedule' | 'cancel';
+  timestamp: string;
+  operator: string;
+  detail: string;
+  relatedReservationIds: string[];
 }
 
 export interface Room {

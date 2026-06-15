@@ -10,6 +10,9 @@ export default function Dashboard() {
   const pendingReservations = reservations.filter(r => r.status === 'pending');
   const confirmedReservations = reservations.filter(r => r.status === 'confirmed');
   const cancelledReservations = reservations.filter(r => r.status === 'cancelled');
+  const conflictHistoryCount = reservations.filter(r => 
+    r.conflictHistory && r.conflictHistory.length > 0
+  ).length;
 
   const stats = [
     {
@@ -43,6 +46,12 @@ export default function Dashboard() {
       color: 'bg-gray-500',
     },
     {
+      label: '冲突历史',
+      value: conflictHistoryCount,
+      icon: Clock,
+      color: 'bg-orange-500',
+    },
+    {
       label: '会议室',
       value: rooms.length,
       icon: Users,
@@ -52,7 +61,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-6 gap-4">
+      <div className="grid grid-cols-7 gap-4">
         {stats.map(stat => {
           const Icon = stat.icon;
           return (

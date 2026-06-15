@@ -167,47 +167,33 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
     
     const hasCurrentConflict = conflictGroup && conflictGroup.reservationIds.length > 1;
     const hasHistoricalConflict = reservation.conflictHistory && reservation.conflictHistory.length > 0;
-    const originalConflictId = reservation.originalConflictId || (hasHistoricalConflict ? reservation.conflictHistory![0].conflictId : null);
     
-    let updatedReservation: Reservation = {
-      ...reservation,
-      status: 'cancelled' as const,
-      updatedAt: new Date().toISOString(),
-      cancellationReason: '用户取消',
-      originalConflictId: originalConflictId,
-    };
-
+    let historyEntry: ConflictHistoryEntry;
+    let conflictIdForLog = '';
+    
     if (hasCurrentConflict) {
-      const historyEntry: ConflictHistoryEntry = {
+      conflictIdForLog = conflictGroup!.id;
+      historyEntry = {
         conflictId: conflictGroup!.id,
         action: 'cancel',
         timestamp: new Date().toISOString(),
         operator: currentUser.name,
-        detail: `取消预约（当前冲突），关联冲突组ID: ${conflictGroup!.id}`,
+        detail: `取消预约（当前冲突），关联冲突组ID: ${conflictGroup!.id}，关联预约: ${conflictGroup!.reservationIds.length}条`,
         relatedReservationIds: conflictGroup!.reservationIds,
       };
-
-      updatedReservation = {
-        ...updatedReservation,
-        conflictHistory: [...(reservation.conflictHistory || []), historyEntry],
-      };
     } else if (hasHistoricalConflict) {
-      const lastConflictEntry = reservation.conflictHistory![reservation.conflictHistory!.length - 1];
-      const historyEntry: ConflictHistoryEntry = {
-        conflictId: lastConflictEntry.conflictId,
+      const lastEntry = reservation.conflictHistory![reservation.conflictHistory!.length - 1];
+      conflictIdForLog = lastEntry.conflictId;
+      historyEntry = {
+        conflictId: lastEntry.conflictId,
         action: 'cancel',
         timestamp: new Date().toISOString(),
         operator: currentUser.name,
-        detail: `取消预约（历史冲突追溯），原冲突组ID: ${lastConflictEntry.conflictId}，操作链: ${reservation.conflictHistory!.map(h => h.action).join(' -> ')}`,
-        relatedReservationIds: lastConflictEntry.relatedReservationIds,
-      };
-
-      updatedReservation = {
-        ...updatedReservation,
-        conflictHistory: [...(reservation.conflictHistory || []), historyEntry],
+        detail: `取消预约（历史冲突追溯），原冲突组ID: ${lastEntry.conflictId}，操作链: ${reservation.conflictHistory!.map(h => h.action).join(' → ')}，关联预约: ${lastEntry.relatedReservationIds.length}条`,
+        relatedReservationIds: lastEntry.relatedReservationIds,
       };
     } else {
-      const historyEntry: ConflictHistoryEntry = {
+      historyEntry = {
         conflictId: 'none',
         action: 'cancel',
         timestamp: new Date().toISOString(),
@@ -215,12 +201,16 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
         detail: `取消预约（无冲突记录）`,
         relatedReservationIds: [],
       };
-
-      updatedReservation = {
-        ...updatedReservation,
-        conflictHistory: [...(reservation.conflictHistory || []), historyEntry],
-      };
     }
+
+    const updatedReservation: Reservation = {
+      ...reservation,
+      status: 'cancelled' as const,
+      updatedAt: new Date().toISOString(),
+      cancellationReason: '用户取消',
+      originalConflictId: conflictIdForLog || undefined,
+      conflictHistory: [...(reservation.conflictHistory || []), historyEntry],
+    };
 
     const updatedReservations = reservations.map(r => 
       r.id === id ? updatedReservation : r
@@ -233,13 +223,13 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
     storage.setReservations(reservationsWithConflict);
 
     const conflictInfo = hasCurrentConflict 
-      ? ` [关联当前冲突: ${conflictGroup!.id}]`
+      ? ` [当前冲突: ${conflictGroup!.id}]`
       : hasHistoricalConflict 
-        ? ` [追溯历史冲突: ${originalConflictId}]`
-        : ' [无冲突记录]';
+        ? ` [历史冲突追溯: ${conflictIdForLog}]`
+        : ' [无冲突]';
 
     get().addLog('cancel', 'reservation', id, 
-      `取消预约: ${reservation.roomName} - ${reservation.organizer} (${new Date(reservation.startTime).toLocaleString('zh-CN')})${conflictInfo}`);
+      `取消预约: ${reservation.roomName} - ${reservation.organizer} (${new Date(reservation.startTime).toLocaleString('zh-CN')})${conflictInfo} [操作链: ${reservation.conflictHistory ? reservation.conflictHistory.map(h => h.action).join(' → ') : '初始'} → cancel]`);
   },
 
   rescheduleReservation: (id, newStartTime, newEndTime) => {
@@ -248,64 +238,10 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
     if (!reservation) return false;
 
     const conflictGroups = detectConflicts(reservations);
-    const hasConflict = conflictGroups.some(cg => 
+    const currentConflictGroup = conflictGroups.find(cg => 
       cg.reservationIds.includes(id) && cg.reservationIds.length > 1
     );
-
-    if (hasConflict) {
-      const currentConflictGroup = conflictGroups.find(cg => cg.reservationIds.includes(id));
-      if (currentConflictGroup) {
-        const relatedReservations = reservations.filter(r => 
-          currentConflictGroup.reservationIds.includes(r.id) && r.id !== id
-        );
-
-        const existingReservations = reservations.filter(
-          r => r.id !== id && r.status !== 'cancelled' && r.roomId === reservation.roomId
-        );
-        const hasTimeOverlap = existingReservations.some(r => {
-          const rStart = new Date(r.startTime).getTime();
-          const rEnd = new Date(r.endTime).getTime();
-          const newStart = new Date(newStartTime).getTime();
-          const newEnd = new Date(newEndTime).getTime();
-          return rStart < newEnd && newStart < rEnd;
-        });
-
-        if (hasTimeOverlap) {
-          return false;
-        }
-
-        const historyEntry: ConflictHistoryEntry = {
-          conflictId: currentConflictGroup.id,
-          action: 'reschedule',
-          timestamp: new Date().toISOString(),
-          operator: get().currentUser.name,
-          detail: `改期: ${new Date(reservation.startTime).toLocaleString('zh-CN')} -> ${new Date(newStartTime).toLocaleString('zh-CN')}`,
-          relatedReservationIds: currentConflictGroup.reservationIds,
-        };
-
-        const updatedReservations = reservations.map(r => 
-          r.id === id ? { 
-            ...r, 
-            startTime: newStartTime, 
-            endTime: newEndTime, 
-            status: 'rescheduled' as const, 
-            updatedAt: new Date().toISOString(),
-            conflictHistory: [...(r.conflictHistory || []), historyEntry],
-          } : r
-        );
-        
-        const newConflictGroups = detectConflicts(updatedReservations);
-        const reservationsWithConflict = getReservationsWithConflictInfo(updatedReservations, newConflictGroups);
-
-        set({ reservations: reservationsWithConflict });
-        storage.setReservations(reservationsWithConflict);
-
-        get().addLog('reschedule', 'reservation', id, 
-          `改期预约: ${reservation.roomName} - ${reservation.organizer} (${new Date(reservation.startTime).toLocaleString('zh-CN')} -> ${new Date(newStartTime).toLocaleString('zh-CN')}) [解除冲突: ${currentConflictGroup.id}]`);
-
-        return true;
-      }
-    }
+    const wasInConflict = !!currentConflictGroup;
 
     const existingReservations = reservations.filter(
       r => r.id !== id && r.status !== 'cancelled' && r.roomId === reservation.roomId
@@ -322,6 +258,36 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
       return false;
     }
 
+    let historyEntry: ConflictHistoryEntry | null = null;
+    let conflictIdForLog = '';
+
+    if (wasInConflict) {
+      conflictIdForLog = currentConflictGroup!.id;
+      historyEntry = {
+        conflictId: currentConflictGroup!.id,
+        action: 'reschedule',
+        timestamp: new Date().toISOString(),
+        operator: get().currentUser.name,
+        detail: `改期解除冲突: ${new Date(reservation.startTime).toLocaleString('zh-CN')} -> ${new Date(newStartTime).toLocaleString('zh-CN')}，冲突组ID: ${currentConflictGroup!.id}`,
+        relatedReservationIds: [...currentConflictGroup!.reservationIds],
+      };
+    } else if (reservation.conflictHistory && reservation.conflictHistory.length > 0) {
+      const lastEntry = reservation.conflictHistory[reservation.conflictHistory.length - 1];
+      conflictIdForLog = lastEntry.conflictId;
+      historyEntry = {
+        conflictId: lastEntry.conflictId,
+        action: 'reschedule',
+        timestamp: new Date().toISOString(),
+        operator: get().currentUser.name,
+        detail: `改期: ${new Date(reservation.startTime).toLocaleString('zh-CN')} -> ${new Date(newStartTime).toLocaleString('zh-CN')}，追溯历史冲突: ${lastEntry.conflictId}`,
+        relatedReservationIds: lastEntry.relatedReservationIds,
+      };
+    }
+
+    const newConflictHistory = historyEntry 
+      ? [...(reservation.conflictHistory || []), historyEntry]
+      : reservation.conflictHistory;
+
     const updatedReservations = reservations.map(r => 
       r.id === id ? { 
         ...r, 
@@ -329,6 +295,7 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
         endTime: newEndTime, 
         status: 'rescheduled' as const, 
         updatedAt: new Date().toISOString(),
+        conflictHistory: newConflictHistory,
       } : r
     );
     
@@ -338,8 +305,11 @@ const useStore = create<StoreState & StoreActions>((set, get) => ({
     set({ reservations: reservationsWithConflict });
     storage.setReservations(reservationsWithConflict);
 
-    get().addLog('reschedule', 'reservation', id, 
-      `改期预约: ${reservation.roomName} - ${reservation.organizer} (${new Date(reservation.startTime).toLocaleString('zh-CN')} -> ${new Date(newStartTime).toLocaleString('zh-CN')})`);
+    const logDetail = conflictIdForLog
+      ? `改期预约: ${reservation.roomName} - ${reservation.organizer} (${new Date(reservation.startTime).toLocaleString('zh-CN')} -> ${new Date(newStartTime).toLocaleString('zh-CN')}) [原冲突: ${conflictIdForLog}]`
+      : `改期预约: ${reservation.roomName} - ${reservation.organizer} (${new Date(reservation.startTime).toLocaleString('zh-CN')} -> ${new Date(newStartTime).toLocaleString('zh-CN')})`;
+
+    get().addLog('reschedule', 'reservation', id, logDetail);
 
     return true;
   },

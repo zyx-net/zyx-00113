@@ -216,16 +216,10 @@ export const runVerificationTests = () => {
 
     const hasAnyHistory = exportReady.some(r => r.冲突历史数 > 0);
     const cancelledWithHistory = exportReady.filter(r => r.状态 === 'cancelled' && r.冲突历史数 > 0);
-
-    log(
-      '导出数据字段完整',
-      true,
-      hasAnyHistory 
-        ? `✅ ${cancelledWithHistory.length} 条取消记录有冲突历史`
-        : '⏸️ 暂无冲突历史（需执行操作后导出）'
-    );
-
-    if (hasAnyHistory) {
+    
+    if (!hasAnyHistory) {
+      log('导出数据冲突历史', false, '⏸️ 暂无冲突历史（需执行先改期再取消后验证导出）', true);
+    } else {
       const withFullChain = exportReady.filter(r => {
         if (r.冲突历史数 === 0) return false;
         const reservation = store.reservations.find(res => res.id === r.预约ID);
@@ -235,12 +229,21 @@ export const runVerificationTests = () => {
       });
 
       log(
-        '导出不丢失完整链',
+        '导出数据包含完整链',
         withFullChain.length > 0,
         withFullChain.length > 0 
-          ? `✅ ${withFullChain.length} 条记录包含完整操作链`
-          : '❌ 无完整操作链'
+          ? `✅ ${withFullChain.length} 条取消记录包含完整操作链`
+          : `❌ ${cancelledWithHistory.length} 条有历史但无完整链`
       );
+
+      if (withFullChain.length > 0) {
+        console.log('   包含完整链的导出数据:');
+        withFullChain.slice(0, 3).forEach(r => {
+          const reservation = store.reservations.find(res => res.id === r.预约ID);
+          const chain = reservation?.conflictHistory?.map(h => h.action).join(' → ') || '-';
+          console.log(`   - ${r.组织者}: ${chain}`);
+        });
+      }
     }
   } catch (e) {
     log('导出数据验证', false, `错误: ${e}`);
@@ -255,26 +258,29 @@ export const runVerificationTests = () => {
     const hasCancelledWithHistory = storedReservations.some(
       r => r.status === 'cancelled' && r.conflictHistory && r.conflictHistory.length > 0
     );
+    const hasCancelled = storedReservations.some(r => r.status === 'cancelled');
 
-    log(
-      'LocalStorage 保留冲突历史',
-      hasCancelledWithHistory,
-      hasCancelledWithHistory 
-        ? '✅ 已取消记录保留了冲突历史'
-        : hasConflictHistoryInStorage 
-          ? '⚠️ 有历史但无取消记录（需执行操作）'
-          : '⏸️ 暂无冲突历史（需执行先改期再取消）'
-    );
-
-    if (hasCancelledWithHistory) {
-      const cancelledWithHistory = storedReservations.filter(
-        r => r.status === 'cancelled' && r.conflictHistory && r.conflictHistory.length > 0
+    if (!hasCancelled) {
+      log('LocalStorage 持久化待验证', false, '⏸️ 暂无取消记录（需执行操作）', true);
+    } else {
+      log(
+        'LocalStorage 保留冲突历史',
+        hasCancelledWithHistory,
+        hasCancelledWithHistory 
+          ? '✅ 已取消记录保留了冲突历史'
+          : '❌ 有取消记录但无冲突历史（数据丢失）'
       );
-      console.log('   LocalStorage 中已取消的预约:');
-      cancelledWithHistory.forEach(r => {
-        const chain = r.conflictHistory.map((h: any) => h.action).join(' → ');
-        console.log(`   - ${r.organizer}: ${chain} (冲突ID: ${r.originalConflictId || '-'})`);
-      });
+
+      if (hasCancelledWithHistory) {
+        const cancelledWithHistory = storedReservations.filter(
+          r => r.status === 'cancelled' && r.conflictHistory && r.conflictHistory.length > 0
+        );
+        console.log('   LocalStorage 中已取消的预约:');
+        cancelledWithHistory.forEach(r => {
+          const chain = r.conflictHistory.map((h: any) => h.action).join(' → ');
+          console.log(`   - ${r.organizer}: ${chain} (冲突ID: ${r.originalConflictId || '-'})`);
+        });
+      }
     }
   } catch (e) {
     log('LocalStorage 验证', false, `错误: ${e}`);
@@ -309,6 +315,93 @@ export const runVerificationTests = () => {
     }
   } catch (e) {
     log('冲突关联验证', false, `错误: ${e}`);
+  }
+
+  console.log('\n🧪 测试9: 权限链路验证');
+  try {
+    const { isAdminMode, currentUser } = store;
+    
+    log(
+      '当前用户角色正确',
+      currentUser.role === 'admin' || currentUser.role === 'user',
+      `当前用户: ${currentUser.name} (${currentUser.role})`
+    );
+
+    log(
+      '管理员权限状态',
+      isAdminMode === (currentUser.role === 'admin'),
+      `管理员模式: ${isAdminMode ? '开启' : '关闭'}`
+    );
+
+    const logs = store.logs;
+    const lockLogs = logs.filter(l => l.action === 'lock');
+    const unlockLogs = logs.filter(l => l.action === 'unlock');
+
+    if (lockLogs.length > 0 || unlockLogs.length > 0) {
+      const lockByAdmin = lockLogs.filter(l => l.operator === '管理员' || l.operator === 'admin');
+      const unlockByAdmin = unlockLogs.filter(l => l.operator === '管理员' || l.operator === 'admin');
+
+      log(
+        '锁房操作权限验证',
+        lockByAdmin.length > 0 || unlockByAdmin.length > 0,
+        `管理员执行锁房: ${lockByAdmin.length} 次，解锁: ${unlockByAdmin.length} 次`
+      );
+
+      if (lockByAdmin.length > 0) {
+        console.log('   锁房日志示例:');
+        lockByAdmin.slice(0, 2).forEach(l => {
+          console.log(`   - ${l.operator} 于 ${new Date(l.timestamp).toLocaleTimeString('zh-CN')} 锁定 ${l.detail.split('锁定')[1] || ''}`);
+        });
+      }
+    } else {
+      console.log('   ⏸️ 无锁房记录（需管理员执行锁房操作后验证）');
+    }
+  } catch (e) {
+    log('权限链路验证', false, `错误: ${e}`);
+  }
+
+  console.log('\n🧪 测试10: 冲突校验逻辑完整性');
+  try {
+    const conflictReservations = store.getConflictReservations();
+    
+    if (conflictReservations.length > 0) {
+      const firstConflict = conflictReservations[0];
+      const conflictId = firstConflict.conflictId;
+      
+      const conflictGroup = store.reservations.filter(
+        r => r.conflictId === conflictId
+      );
+
+      const hasRealConflict = conflictGroup.some(r => {
+        return conflictGroup.some(other => {
+          if (r.id === other.id) return false;
+          const rStart = new Date(r.startTime).getTime();
+          const rEnd = new Date(r.endTime).getTime();
+          const oStart = new Date(other.startTime).getTime();
+          const oEnd = new Date(other.endTime).getTime();
+          return rStart < oEnd && oStart < rEnd;
+        });
+      });
+
+      log(
+        '冲突组真实存在',
+        hasRealConflict,
+        hasRealConflict 
+          ? `✅ 冲突组 ${conflictId} 中预约确实有时间重叠`
+          : `❌ 冲突组 ${conflictId} 可能误判，无真实重叠`
+      );
+
+      if (!hasRealConflict) {
+        console.log('   冲突组内预约时间:');
+        conflictGroup.forEach(r => {
+          console.log(`   - ${r.organizer}: ${new Date(r.startTime).toLocaleString('zh-CN')} - ${new Date(r.endTime).toLocaleString('zh-CN')}`);
+        });
+      }
+    } else {
+      console.log('   ⏸️ 当前无冲突预约');
+    }
+  } catch (e) {
+    log('冲突校验验证', false, `错误: ${e}`);
   }
 
   console.log('\n========================================');
